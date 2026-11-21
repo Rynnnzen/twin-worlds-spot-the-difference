@@ -1,124 +1,192 @@
-// The game's rules and state, with no drawing and no browser in it: the player's paddle, the
-// pool of falling blocks and coins, spawning, collisions, score, lives and level. step() advances
-// one fixed step and returns what happened as bit flags, so the caller can react without the
-// world knowing about screens or sound. Nothing here allocates after createWorld returns.
-import { BLOCK, COIN, FIELD, LEVEL, LIVES, PLAYER, POOL_SIZE } from './config.js';
+// The game's rules and state, with no drawing and no browser in it: the eight
+// scenes, the differences in play per mode, guesses, score and streak, hints,
+// the countdown, and campaign progression. Time is measured in seconds elapsed
+// while playing (the loop does not tick while paused), so pausing freezes the
+// clock, the hint cooldown and the streak window together.
 
-export const KIND_BLOCK = 0;
-export const KIND_COIN = 1;
+import { HINT_COOLDOWN_SEC, HINT_SHOW_SEC, MAX_MULTIPLIER, MODES, SCORE_PER_FIND, STREAK_WINDOW_SEC } from './config.js';
+import { activeDifferences } from './differences.js';
+import { SCENES } from './scenes.js';
 
-export const EVENT_HIT = 1;
-export const EVENT_COIN = 2;
-export const EVENT_OVER = 4;
+export const STATUS_PLAYING = 'playing';
+export const STATUS_SCENE_DONE = 'scene-done';
+export const STATUS_TIME_UP = 'time-up';
+export const STATUS_CAMPAIGN_DONE = 'campaign-done';
 
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+function distance(x1, y1, x2, y2) {
+  return Math.hypot(x1 - x2, y1 - y2);
 }
 
-export function createWorld(random) {
-  const player = { x: 0, y: FIELD.groundY - PLAYER.height, width: PLAYER.width, height: PLAYER.height, invulnerable: 0 };
-  const items = [];
-  for (let index = 0; index < POOL_SIZE; index += 1) {
-    items.push({ active: false, kind: KIND_BLOCK, x: 0, y: 0, width: 0, height: 0, speed: 0 });
-  }
-  const state = { player, items, score: 0, lives: LIVES, level: 1, elapsed: 0, blockTimer: 0, coinTimer: 0 };
+export function createWorld() {
+  const state = {
+    mode: 'classic',
+    sceneIndex: 0,
+    found: new Set(),
+    foundOrder: [],
+    foundAt: new Map(),
+    score: 0,
+    multiplier: 1,
+    streak: 0,
+    lastFindAt: -Infinity,
+    elapsed: 0,
+    timeLeft: 0,
+    hintsLeft: 0,
+    hintReadyAt: 0,
+    hintReveal: null,
+    status: STATUS_PLAYING,
+    completed: new Set(),
+    totalFound: 0,
+    floats: [],
+    misses: 0,
+  };
 
-  function reset() {
-    player.x = (FIELD.width - player.width) / 2;
-    player.invulnerable = 0;
-    for (const item of items) item.active = false;
+  /** The differences in play for the current scene and mode. */
+  function active() {
+    return activeDifferences(state.sceneIndex, state.mode);
+  }
+
+  function remaining() {
+    return active().length - state.found.size;
+  }
+
+  function startScene(index) {
+    state.sceneIndex = index;
+    state.found = new Set();
+    state.foundOrder = [];
+    state.foundAt = new Map();
+    state.hintReveal = null;
+    state.floats = [];
+    const mode = MODES[state.mode];
+    state.timeLeft = mode.seconds;
+    state.hintsLeft = mode.hints;
+    state.hintReadyAt = 0;
+    state.status = STATUS_PLAYING;
+  }
+
+  function startCampaign(mode) {
+    state.mode = mode;
     state.score = 0;
-    state.lives = LIVES;
-    state.level = 1;
+    state.multiplier = 1;
+    state.streak = 0;
+    state.lastFindAt = -Infinity;
     state.elapsed = 0;
-    state.blockTimer = BLOCK.interval;
-    state.coinTimer = COIN.interval;
+    state.completed = new Set();
+    state.totalFound = 0;
+    state.misses = 0;
+    startScene(0);
   }
 
-  function freeItem() {
-    for (let index = 0; index < items.length; index += 1) if (!items[index].active) return items[index];
-    return null;
-  }
-
-  function spawnBlock() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_BLOCK;
-    item.width = BLOCK.minWidth + random() * (BLOCK.maxWidth - BLOCK.minWidth);
-    item.height = BLOCK.height;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = BLOCK.speed + BLOCK.speedPerLevel * (state.level - 1) + random() * BLOCK.speedJitter;
-  }
-
-  function spawnCoin() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_COIN;
-    item.width = COIN.size;
-    item.height = COIN.size;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = COIN.speed + COIN.speedPerLevel * (state.level - 1);
-  }
-
-  function blockInterval() {
-    return Math.max(BLOCK.minInterval, BLOCK.interval * BLOCK.intervalScale ** (state.level - 1));
+  function switchMode(mode) {
+    state.mode = mode;
+    startScene(state.sceneIndex);
   }
 
   /**
-   * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
-   * screen's backdrop) things fall but nothing touches the player and nothing scores.
+   * A guess at panel-local (x, y) on either picture. Returns what happened:
+   * found (with the difference and the points scored), miss, already (a spot
+   * found before — harmless) or none (not playing).
    */
-  function step(dt, direction, harmless) {
-    let events = 0;
-    state.elapsed += dt;
-    state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
-
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
-
-    state.blockTimer -= dt;
-    if (state.blockTimer <= 0) {
-      spawnBlock();
-      state.blockTimer += blockInterval();
-    }
-    state.coinTimer -= dt;
-    if (state.coinTimer <= 0) {
-      spawnCoin();
-      state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
-    }
-
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      item.y += item.speed * dt;
-      if (item.y > FIELD.groundY) {
-        item.active = false;
-        if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;
-        continue;
+  function applyGuess(x, y) {
+    if (state.status !== STATUS_PLAYING) return { type: 'none' };
+    for (const d of active()) {
+      if (state.found.has(d.id)) continue;
+      if (distance(x, y, d.hx, d.hy) > (d.hr ?? 26)) continue;
+      state.found.add(d.id);
+      state.foundOrder.push(d.id);
+      state.foundAt.set(d.id, state.elapsed);
+      state.totalFound += 1;
+      const withinWindow = state.elapsed - state.lastFindAt <= STREAK_WINDOW_SEC;
+      state.streak = withinWindow ? state.streak + 1 : 1;
+      state.lastFindAt = state.elapsed;
+      state.multiplier = Math.min(MAX_MULTIPLIER, state.streak);
+      const points = SCORE_PER_FIND * state.multiplier;
+      state.score += points;
+      state.floats.push({ x: d.hx, y: d.hy, text: `+${points}`, at: state.elapsed });
+      if (remaining() === 0) {
+        state.completed.add(state.sceneIndex);
+        const bonus = state.timeLeft > 0 ? Math.round(state.timeLeft) * 5 : 0;
+        state.score += bonus;
+        state.status = STATUS_SCENE_DONE;
       }
-      if (harmless || !overlaps(item, player)) continue;
-      if (item.kind === KIND_COIN) {
-        item.active = false;
-        state.score += COIN.points;
-        events |= EVENT_COIN;
-      } else if (player.invulnerable === 0) {
-        item.active = false;
-        state.lives -= 1;
-        player.invulnerable = PLAYER.invulnerable;
-        events |= EVENT_HIT;
-        if (state.lives === 0) {
-          events |= EVENT_OVER;
-          break;
-        }
-      }
+      return { type: 'found', diff: d, points, multiplier: state.multiplier };
     }
-    return events;
+    for (const d of active()) {
+      if (!state.found.has(d.id)) continue;
+      if (distance(x, y, d.hx, d.hy) <= (d.hr ?? 26)) return { type: 'already', diff: d };
+    }
+    state.misses += 1;
+    state.streak = 0;
+    state.multiplier = 1;
+    const mode = MODES[state.mode];
+    if (mode.penaltySec > 0) state.timeLeft = Math.max(0, state.timeLeft - mode.penaltySec);
+    return { type: 'miss' };
   }
 
-  reset();
-  return { state, reset, step };
+  /** Spend one hint: briefly highlight an unfound difference on both panels. */
+  function useHint() {
+    if (state.status !== STATUS_PLAYING) return null;
+    if (state.hintsLeft <= 0) return null;
+    if (state.elapsed < state.hintReadyAt) return null;
+    const unfound = active().filter((d) => !state.found.has(d.id));
+    if (unfound.length === 0) return null;
+    const pick = unfound[Math.floor(Math.random() * unfound.length)];
+    state.hintsLeft -= 1;
+    state.hintReadyAt = state.elapsed + HINT_COOLDOWN_SEC;
+    state.hintReveal = { diff: pick, until: state.elapsed + HINT_SHOW_SEC };
+    state.streak = 0;
+    state.multiplier = 1;
+    return pick;
+  }
+
+  /** Advance the clock by dt seconds. Returns 'timeout' when the clock runs out. */
+  function tick(dt) {
+    if (state.status !== STATUS_PLAYING) return null;
+    state.elapsed += dt;
+    if (state.hintReveal && state.elapsed >= state.hintReveal.until) state.hintReveal = null;
+    state.floats = state.floats.filter((f) => state.elapsed - f.at < 0.6);
+    const mode = MODES[state.mode];
+    if (mode.seconds > 0) {
+      state.timeLeft -= dt;
+      if (state.timeLeft <= 0) {
+        state.timeLeft = 0;
+        state.status = STATUS_TIME_UP;
+        return 'timeout';
+      }
+    }
+    return null;
+  }
+
+  /** Move to the next scene. Returns false when the campaign is complete. */
+  function nextScene() {
+    if (state.sceneIndex + 1 >= SCENES.length) {
+      state.status = STATUS_CAMPAIGN_DONE;
+      return false;
+    }
+    startScene(state.sceneIndex + 1);
+    return true;
+  }
+
+  function retryScene() {
+    startScene(state.sceneIndex);
+  }
+
+  function continueRelaxed() {
+    state.mode = 'relaxed';
+    startScene(state.sceneIndex);
+  }
+
+  return {
+    state,
+    active,
+    remaining,
+    startScene,
+    startCampaign,
+    switchMode,
+    applyGuess,
+    useHint,
+    tick,
+    nextScene,
+    retryScene,
+    continueRelaxed,
+  };
 }

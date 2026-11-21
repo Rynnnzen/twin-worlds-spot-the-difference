@@ -1,53 +1,55 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Pointer and keyboard input, with no game rules in it: mouse position and
+// clicks in field coordinates, single-press key events, and the set of keys
+// currently held (for the crosshair). Arrow keys, Space and Tab are captured
+// so the page never scrolls or moves focus while playing.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export function createInput(canvas, toField) {
+  let mouse = null;
+  const clicks = [];
+  const pressed = [];
+  const held = new Set();
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+  const CAPTURED = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'Tab']);
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
+  canvas.addEventListener('mousemove', (event) => {
+    mouse = toField(event.clientX, event.clientY);
+  });
+  canvas.addEventListener('mouseleave', () => {
+    mouse = null;
+  });
+  canvas.addEventListener('click', (event) => {
+    const point = toField(event.clientX, event.clientY);
+    if (point) clicks.push(point);
+  });
   window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+    if (CAPTURED.has(event.code)) event.preventDefault();
+    if (event.repeat) return;
+    held.add(event.code);
+    pressed.push(event.code);
   });
   window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+    held.delete(event.code);
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
   window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+    held.clear();
   });
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    /** The mouse position in field coordinates, or null outside the field. */
+    mouse() {
+      return mouse;
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+    /** Clicks since the last call, in field coordinates. */
+    takeClicks() {
+      return clicks.splice(0, clicks.length);
+    },
+    /** Key codes pressed since the last call (no repeats). */
+    takePressed() {
+      return pressed.splice(0, pressed.length);
+    },
+    /** Whether a key code is currently held down. */
+    held(code) {
+      return held.has(code);
     },
   };
 }

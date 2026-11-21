@@ -1,5 +1,1 @@
-[
-  { "name": "1-start.jpg", "query": "?shot=start&seed=1" },
-  { "name": "2-play.jpg", "query": "?shot=play&seed=1" },
-  { "name": "3-end.jpg", "query": "?shot=end&seed=1" }
-]
+{"shots":[{"name":"1-cover.jpg","note":"Cover: Mushroom Mailroom mid-hunt — 4 found (gold rings on both panels), 4 left, 44s on the clock, Score 1000, Streak x4.","query":"?shot=play&scene=4&seed=21"},{"name":"2-start.jpg","note":"Title screen: mode selector, Start Expedition, and the eight-world thumbnail strip.","query":"?shot=start&scene=1&seed=21"},{"name":"3-observatory.jpg","note":"Comet Seed Archive — 3 found, 5 left, 32s left, magnifier open over the observatory dome.","query":"?shot=play&scene=8&seed=21&lens=956,322"},{"name":"4-complete.jpg","note":"Campaign complete: 64/64 differences, final score, all eight world badges.","query":"?shot=end&seed=21"}]}

@@ -1,61 +1,85 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Every tuning number, colour and layout constant for Twin Worlds in one place.
+// The playfield is a fixed 1280x720 logical area; the renderer scales it to fit
+// the window, so no rule below depends on the screen size. Each picture panel is
+// a 600x420 scene; scene art uses panel-local coordinates (0..600, 0..420).
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
+export const FIELD = { width: 1280, height: 720 };
 
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
+// The two picture panels.
+export const PANEL = { width: 600, height: 420, y: 142, gap: 32, radius: 14 };
+export const LEFT_PANEL = { x: 24, y: PANEL.y, width: PANEL.width, height: PANEL.height };
+export const RIGHT_PANEL = { x: 656, y: PANEL.y, width: PANEL.width, height: PANEL.height };
 
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+// HUD geometry.
+export const HUD = {
+  topY: 16,
+  counterX: 530,
+  scoreX: 760,
+  clockX: 1040,
+  timerBar: { x: 24, y: 86, width: 1232, height: 10 },
+  labelY: 112,
+  controlsY: 580,
+  controlsH: 44,
+  stripY: 638,
+  stripH: 36,
+  helpY: 700,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+// Buttons on the controls row (y = HUD.controlsY, height = HUD.controlsH).
+export const BUTTONS = {
+  hint: { x: 420, width: 156 },
+  pause: { x: 588, width: 104 },
+  lens: { x: 704, width: 132 },
+  mode: { x: 848, width: 180 },
+  atlas: { x: 1040, width: 216 },
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+// Scene strip: eight numbered buttons.
+export const STRIP = { x: 30, width: 142, gap: 12 };
+
+// Found markers: a ring around the found spot on both panels.
+export const MARKER = { radius: 23, lineWidth: 3, popMs: 180, floatMs: 500 };
+
+// The magnifier lens.
+export const LENS = { diameter: 120, zoom: 2 };
+
+// Game modes. Relaxed plays a 5-difference subset with no clock and no penalty.
+export const MODES = {
+  classic: { label: 'Classic', diffs: 8, seconds: 120, hints: 2, penaltySec: 5 },
+  relaxed: { label: 'Relaxed', diffs: 5, seconds: 0, hints: 2, penaltySec: 0 },
+  expert: { label: 'Expert', diffs: 8, seconds: 75, hints: 0, penaltySec: 5 },
 };
+export const MODE_ORDER = ['classic', 'relaxed', 'expert'];
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+export const HINT_COOLDOWN_SEC = 8;
+export const HINT_SHOW_SEC = 1.5;
+export const STREAK_WINDOW_SEC = 15;
+export const SCORE_PER_FIND = 100;
+export const MAX_MULTIPLIER = 4;
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+// Clicks within this radius (panel-local px) of a difference centre count as a hit.
+export const HIT_RADIUS = 26;
+export const HIT_RADIUS_MOVED = 32;
 
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
+  backdrop: '#14161f',
+  surface: '#1d2029',
+  panel: '#232633',
+  ivory: '#f5efdd',
   text: '#eef1f5',
-  muted: '#8b93a3',
+  muted: '#9aa1b1',
+  mint: '#7fe0b2',
+  mintDeep: '#3fae7a',
+  amber: '#f2b64c',
+  coral: '#e5534b',
+  gold: '#f2c94c',
+  ring: '#fdf6d8',
+  check: '#7fe0b2',
+  button: '#2c3040',
+  buttonHot: '#3a3f52',
 };
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+/** Where best campaign scores are kept between visits (this browser only). */
+export const BEST_KEY = 'twin-worlds.best.v1';
